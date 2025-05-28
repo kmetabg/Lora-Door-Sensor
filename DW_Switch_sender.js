@@ -1,37 +1,32 @@
 let CONFIG = {
-  DEVICE_ID: 202,  // BTHome sensor component ID
-  LORA_DST: 2      // LoRa Receiver Device ID
+  DEVICE_ID: 202,  // BTHome sensor ID
+  LORA_DST: 2      // LoRa Receiver ID
 };
 
-// 🔁 LoRa send function
-function sendLoraByte(byte) {
-  let encoded = btoa(String.fromCharCode(byte));
+// Monitor both the door sensor and the switch output
+Shelly.addStatusHandler(function(status) {
+  // Door sensor sync (1 byte)
+  if (status.id === CONFIG.DEVICE_ID && typeof status.delta.value !== "undefined") {
+    let isOpen = status.delta.value;
+    let byte = isOpen ? "\x01" : "\x00";
+    let encoded = btoa(byte);
 
-  Shelly.call("Lora.SendBytes", {
-    id: CONFIG.LORA_DST,
-    data: encoded
-  }, function (_, err_code, err_msg) {
-    if (err_code !== 0) {
-      print("LoRa send error:", err_code, err_msg);
-    } else {
-      print("LoRa sent byte:", byte);
-    }
-  });
-}
-
-// 🧠 Status handler for door sensor and output
-Shelly.addStatusHandler(function(e) {
-  // ✅ Door sensor status (no component for direct bthomesensor.GetStatus)
-  if (e.id === CONFIG.DEVICE_ID && typeof e.delta === "object" && typeof e.delta.value !== "undefined") {
-    let isOpen = e.delta.value;
-    sendLoraByte(isOpen ? 0x01 : 0x00);
-    print("Door state changed:", isOpen ? "open" : "closed");
+    Shelly.call("Lora.SendBytes", {
+      id: CONFIG.LORA_DST,
+      data: encoded
+    });
   }
 
-  // ✅ Output state from switch:0
-  if (e.component === "switch:0" && typeof e.delta === "object" && typeof e.delta.output !== "undefined") {
-    let isOn = e.delta.output;
-    sendLoraByte(isOn ? 0x10 : 0x11);
-    print("Output changed:", isOn ? "ON" : "OFF");
+  // Output state sync
+  if (status.component === "switch" && status.id === 0 && typeof status.delta.output !== "undefined") {
+    let byte = status.delta.output ? "\x10" : "\x11";  // ON = 0x10, OFF = 0x11
+    let encoded = btoa(byte);
+
+    Shelly.call("Lora.SendBytes", {
+      id: CONFIG.LORA_DST,
+      data: encoded
+    });
+
+    print("Sent output state over LoRa:", status.delta.output ? "ON" : "OFF");
   }
 });
