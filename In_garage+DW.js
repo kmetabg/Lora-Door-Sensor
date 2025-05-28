@@ -1,32 +1,41 @@
 let CONFIG = {
-  DEVICE_ID: 202,  // BTHome sensor ID
-  LORA_DST: 2      // LoRa Receiver ID
+  DEVICE_ID: 202,  // Door sensor component ID
+  LORA_DST: 2      // Receiver LoRa ID
 };
 
-// Monitor both the door sensor and the switch output
-Shelly.addStatusHandler(function(status) {
-  // Door sensor sync (1 byte)
-  if (status.id === CONFIG.DEVICE_ID && typeof status.delta.value !== "undefined") {
-    let isOpen = status.delta.value;
-    let byte = isOpen ? "\x01" : "\x00";
-    let encoded = btoa(byte);
+function sendLoraByte(byte) {
+  let encoded = btoa(String.fromCharCode(byte));
+  Shelly.call("Lora.SendBytes", { id: CONFIG.LORA_DST, data: encoded });
+}
 
-    Shelly.call("Lora.SendBytes", {
-      id: CONFIG.LORA_DST,
-      data: encoded
-    });
+// Door sensor reporting
+Shelly.addStatusHandler(function(e) {
+  if (e.id === CONFIG.DEVICE_ID && typeof e.delta === "object" && typeof e.delta.value !== "undefined") {
+    let isOpen = e.delta.value;
+    sendLoraByte(isOpen ? 0x01 : 0x00);
+    print("Door status sent:", isOpen ? "open" : "closed");
   }
+});
 
-  // Output state sync
-  if (status.component === "switch" && status.id === 0 && typeof status.delta.output !== "undefined") {
-    let byte = status.delta.output ? "\x10" : "\x11";  // ON = 0x10, OFF = 0x11
-    let encoded = btoa(byte);
-
-    Shelly.call("Lora.SendBytes", {
-      id: CONFIG.LORA_DST,
-      data: encoded
-    });
-
-    print("Sent output state over LoRa:", status.delta.output ? "ON" : "OFF");
+// LoRa receive for output pulse trigger
+Shelly.addEventHandler(function(event) {
+//  print (event.name);
+  if (
+    typeof event === "object" &&
+    event.name === "lora" &&
+    event.info && event.info.data
+  ) {
+    try {
+      let byte = atob(event.info.data).charCodeAt(0);
+      if (byte === 0xA0) {
+        print("Received pulse command → pulsing output");
+        Shelly.call("Switch.Set", { id: 0, on: true });
+        Timer.set(500, false, function() {
+          Shelly.call("Switch.Set", { id: 0, on: false });
+        });
+      }
+    } catch (e) {
+      print("LoRa decode error:", e);
+    }
   }
 });
